@@ -6,6 +6,13 @@ use sha2::{Digest, Sha256};
 const INSTITUTION_ID: &str = "01J00000000000000000000000";
 const ATTACHMENT_ID: &str = "01J00000000000000000000001";
 const AUDIT_ID: &str = "01J00000000000000000000002";
+const STAFF_ID: &str = "01J00000000000000000000010";
+const SITE_ID: &str = "01J00000000000000000000011";
+const SPACE_ID: &str = "01J00000000000000000000012";
+const POSITION_ID: &str = "01J00000000000000000000013";
+const DAY_AREA_ID: &str = "01J00000000000000000000014";
+const HOME_AREA_ID: &str = "01J00000000000000000000015";
+const SITE_ASSIGNMENT_ID: &str = "01J00000000000000000000016";
 const NOW: &str = "2026-07-18T01:30:00.000Z";
 
 #[test]
@@ -18,14 +25,16 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
     assert!(first.capabilities().wal_enabled);
     assert!(first.capabilities().json_supported);
     assert!(first.capabilities().strict_supported);
-    assert_eq!(first.migration_report().available, 2);
-    assert_eq!(first.migration_report().applied, 2);
-    assert_eq!(first.migration_report().newly_applied, 2);
+    assert_eq!(first.migration_report().available, 5);
+    assert_eq!(first.migration_report().applied, 5);
+    assert_eq!(first.migration_report().newly_applied, 5);
+    assert!(first.pre_upgrade_backup_path().is_none());
     drop(first);
 
     let second = FormalDatabase::open(temp.path()).unwrap();
-    assert_eq!(second.migration_report().applied, 2);
+    assert_eq!(second.migration_report().applied, 5);
     assert_eq!(second.migration_report().newly_applied, 0);
+    assert!(second.pre_upgrade_backup_path().is_none());
     let connection = open_test_connection(second.path());
 
     let versions = connection
@@ -42,6 +51,9 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
         vec![
             (1, "schema_metadata_and_institution".to_owned()),
             (2, "attachments_and_audit".to_owned()),
+            (3, "staff_and_organization".to_owned()),
+            (4, "institution_sites_and_resources".to_owned()),
+            (5, "staff_site_assignments".to_owned()),
         ]
     );
 }
@@ -126,9 +138,232 @@ fn formal_schema_matches_the_reviewed_snapshot() {
     let database = FormalDatabase::open(temp.path()).unwrap();
     let connection = open_test_connection(database.path());
     let actual = schema_snapshot(&connection);
-    let expected = include_str!("snapshots/m0_m1_schema.snapshot").trim();
+    let expected = include_str!("snapshots/m0_m2_schema.snapshot").trim();
 
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn m2_staff_site_and_resource_constraints_form_a_valid_chain() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = FormalDatabase::open(temp.path()).unwrap();
+    let connection = open_test_connection(database.path());
+    insert_institution(&connection, INSTITUTION_ID, "ORG-M2").unwrap();
+    insert_staff(&connection, STAFF_ID, INSTITUTION_ID, "STAFF-001").unwrap();
+
+    connection
+        .execute(
+            "INSERT INTO departments(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, parent_id,
+                department_code, name, manager_staff_id, sort_order, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, NULL,
+                'CARE', '照护部', ?4, 0, 'active')",
+            params!["01J00000000000000000000017", INSTITUTION_ID, NOW, STAFF_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO employment_periods(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, staff_id,
+                employment_type, start_date, end_date, status, employer_name, personnel_note
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?4,
+                'formal', '2026-01-01', NULL, 'active', NULL, NULL)",
+            params!["01J00000000000000000000018", INSTITUTION_ID, NOW, STAFF_ID],
+        )
+        .unwrap();
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO employment_periods(
+                    id, institution_id, created_at, created_source, updated_at, record_version,
+                    staff_id, employment_type, start_date, end_date, status
+                 ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, 'formal',
+                    '2026-02-01', NULL, 'ended')",
+                params!["01J00000000000000000000019", INSTITUTION_ID, NOW, STAFF_ID],
+            )
+            .is_err()
+    );
+
+    connection
+        .execute(
+            "INSERT INTO institution_capabilities(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, capability_type,
+                enabled, declared_capacity, policy_notice_code, policy_notice_seen_at,
+                institution_note
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1,
+                'day', 1, 10, 'POLICY-1', ?3, NULL)",
+            params!["01J00000000000000000000020", INSTITUTION_ID, NOW, STAFF_ID],
+        )
+        .unwrap();
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO institution_capabilities(
+                    id, institution_id, created_at, created_source, updated_at, record_version,
+                    capability_type, enabled, declared_capacity
+                 ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, 'home', 1, 1)",
+                params!["01J00000000000000000000021", INSTITUTION_ID, NOW],
+            )
+            .is_err()
+    );
+
+    insert_site(
+        &connection,
+        SITE_ID,
+        INSTITUTION_ID,
+        STAFF_ID,
+        1,
+        "SITE-001",
+    )
+    .unwrap();
+    connection
+        .execute(
+            "INSERT INTO service_site_scenes(
+                institution_id, created_at, created_by_staff_id, created_source,
+                service_site_id, scene
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, 'day')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, SITE_ID],
+        )
+        .unwrap();
+    assert!(
+        insert_site(
+            &connection,
+            "01J00000000000000000000022",
+            INSTITUTION_ID,
+            STAFF_ID,
+            1,
+            "SITE-002"
+        )
+        .is_err()
+    );
+
+    connection
+        .execute(
+            "INSERT INTO space_nodes(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, site_id, parent_id,
+                node_type, space_code, name, sort_order, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, NULL,
+                'room', 'R-101', '101室', 0, 'active')",
+            params![SPACE_ID, INSTITUTION_ID, NOW, STAFF_ID, SITE_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO accommodation_positions(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, site_id, space_node_id,
+                position_code, name, primary_use, respite_eligible,
+                occupancy_gender_rule, status, status_note
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, ?6,
+                'BED-01', '101-1床', 'residential_bed', 1, 'none', 'active', NULL)",
+            params![
+                POSITION_ID,
+                INSTITUTION_ID,
+                NOW,
+                STAFF_ID,
+                SITE_ID,
+                SPACE_ID
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO accommodation_position_features(
+                institution_id, created_at, created_by_staff_id, created_source,
+                accommodation_position_id, feature_value
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, '靠近护理站')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, POSITION_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO day_care_areas(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, site_id, space_node_id,
+                area_code, name, capacity, numbered_rest_positions, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, ?6,
+                'DAY-01', '日间活动区', 10, 1, 'active')",
+            params![
+                DAY_AREA_ID,
+                INSTITUTION_ID,
+                NOW,
+                STAFF_ID,
+                SITE_ID,
+                SPACE_ID
+            ],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "INSERT INTO home_service_areas(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, site_id, area_code,
+                name, province_code, city_code, boundary_description, travel_note, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, 'HOME-01',
+                '中心城区', '41', '4101', '站点周边五公里', NULL, 'active')",
+            params![HOME_AREA_ID, INSTITUTION_ID, NOW, STAFF_ID, SITE_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO home_service_area_districts(
+                institution_id, created_at, created_by_staff_id, created_source,
+                home_service_area_id, district_code
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, '410102')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, HOME_AREA_ID],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "INSERT INTO site_assignments(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, staff_id, site_id,
+                is_primary, effective_from_date, effective_to_date
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?4, ?5,
+                1, '2026-01-01', NULL)",
+            params![SITE_ASSIGNMENT_ID, INSTITUTION_ID, NOW, STAFF_ID, SITE_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO site_assignment_scenes(
+                institution_id, created_at, created_by_staff_id, created_source,
+                site_assignment_id, scene
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, 'day')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, SITE_ASSIGNMENT_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM site_assignments WHERE id = ?1",
+            [SITE_ASSIGNMENT_ID],
+        )
+        .unwrap();
+    let remaining_assignment_scenes: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM site_assignment_scenes WHERE site_assignment_id = ?1",
+            [SITE_ASSIGNMENT_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining_assignment_scenes, 0);
+
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    let foreign_key_violations: i64 = connection
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    assert_eq!(foreign_key_violations, 0);
 }
 
 #[test]
@@ -215,6 +450,53 @@ fn insert_attachment(
     )
 }
 
+fn insert_staff(
+    connection: &Connection,
+    id: &str,
+    institution_id: &str,
+    staff_code: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO staff_members(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, staff_code, full_name,
+            gender, birth_date, id_type, id_number, id_number_normalized,
+            mobile, mobile_normalized, email, emergency_contact_name,
+            emergency_contact_phone, avatar_attachment_id, profile_note
+         ) VALUES (?1, ?2, ?3, NULL, 'manual', ?3, NULL, 1, ?4, '测试员工',
+            'unknown', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
+        params![id, institution_id, NOW, staff_code],
+    )
+}
+
+fn insert_site(
+    connection: &Connection,
+    id: &str,
+    institution_id: &str,
+    manager_staff_id: &str,
+    is_default: i64,
+    site_code: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO service_sites(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, site_code, name,
+            site_type, is_default, manager_staff_id, contact_phone, province_code,
+            city_code, district_code, address_detail, status, disabled_reason
+         ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, '测试站点',
+            'comprehensive', ?6, ?4, NULL, '41', '4101', '410102',
+            '测试路2号', 'active', NULL)",
+        params![
+            id,
+            institution_id,
+            NOW,
+            manager_staff_id,
+            site_code,
+            is_default
+        ],
+    )
+}
+
 fn insert_audit(connection: &Connection, id: &str, action: &str) -> rusqlite::Result<usize> {
     connection.execute(
         "INSERT INTO audit_events(
@@ -255,50 +537,50 @@ fn schema_snapshot(connection: &Connection) -> String {
                 |row| row.get(0),
             )
             .unwrap();
+        let escaped_table = table.replace('"', "\"\"");
+        let column_count: i64 = connection
+            .query_row(
+                &format!("SELECT COUNT(*) FROM pragma_table_xinfo(\"{escaped_table}\")"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let foreign_key_column_count: i64 = connection
+            .query_row(
+                &format!("SELECT COUNT(*) FROM pragma_foreign_key_list(\"{escaped_table}\")"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         lines.push(format!(
-            "TABLE {table} strict={} sql_sha256={:x}",
+            "TABLE {table} strict={} columns={column_count} fk_columns={foreign_key_column_count} sql_sha256={:x}",
             i32::from(strict),
             Sha256::digest(sql.as_bytes())
         ));
+    }
 
-        let escaped_table = table.replace('"', "\"\"");
-        let columns = connection
-            .prepare(&format!("PRAGMA table_xinfo(\"{escaped_table}\")"))
-            .unwrap()
-            .query_map([], |row| {
-                Ok(format!(
-                    "  COLUMN {} {} not_null={} default={} pk={} hidden={}",
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, bool>(3)? as i32,
-                    row.get::<_, Option<String>>(4)?
-                        .unwrap_or_else(|| "NULL".to_owned()),
-                    row.get::<_, i32>(5)?,
-                    row.get::<_, i32>(6)?,
-                ))
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        lines.extend(columns);
-
-        let foreign_keys = connection
-            .prepare(&format!("PRAGMA foreign_key_list(\"{escaped_table}\")"))
-            .unwrap()
-            .query_map([], |row| {
-                Ok(format!(
-                    "  FK {} -> {}.{} on_update={} on_delete={}",
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        lines.extend(foreign_keys);
+    let indexes = connection
+        .prepare(
+            "SELECT name, tbl_name, sql FROM sqlite_schema
+             WHERE type = 'index' AND sql IS NOT NULL
+             ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for (name, table, sql) in indexes {
+        lines.push(format!(
+            "INDEX {name} table={table} sql_sha256={:x}",
+            Sha256::digest(sql.as_bytes())
+        ));
     }
 
     lines.join("\n")

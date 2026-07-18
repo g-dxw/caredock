@@ -36,7 +36,7 @@ pub(crate) struct Migration {
     pub sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[
+pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
         name: "schema_metadata_and_institution",
@@ -46,6 +46,21 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "attachments_and_audit",
         sql: include_str!("../migrations/0002_attachments_and_audit.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "staff_and_organization",
+        sql: include_str!("../migrations/0003_staff_and_organization.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "institution_sites_and_resources",
+        sql: include_str!("../migrations/0004_institution_sites_and_resources.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "staff_site_assignments",
+        sql: include_str!("../migrations/0005_staff_site_assignments.sql"),
     },
 ];
 
@@ -68,6 +83,8 @@ pub enum MigrationError {
     Blocked { reason: String },
     #[error("failed to create a canonical UTC timestamp")]
     Timestamp,
+    #[error("pre-upgrade backup verification failed")]
+    BackupVerification,
 }
 
 impl MigrationError {
@@ -75,7 +92,9 @@ impl MigrationError {
         match self {
             Self::Blocked { .. } => "MIGRATION_BLOCKED",
             Self::CapabilityMissing(_) => "SQLITE_CAPABILITY_MISSING",
-            Self::Sqlite(_) | Self::Io(_) | Self::Timestamp => "STORAGE_FAILURE",
+            Self::Sqlite(_) | Self::Io(_) | Self::Timestamp | Self::BackupVerification => {
+                "STORAGE_FAILURE"
+            }
         }
     }
 }
@@ -88,7 +107,31 @@ pub(crate) fn migrate(
     apply_migrations(connection, application_version, MIGRATIONS)
 }
 
-fn bootstrap(connection: &Connection) -> Result<(), MigrationError> {
+pub(crate) fn latest_version() -> i64 {
+    MIGRATIONS.last().map_or(0, |migration| migration.version)
+}
+
+pub(crate) fn current_version(connection: &Connection) -> Result<Option<i64>, MigrationError> {
+    let migrations_table_exists: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'schema_migrations'
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !migrations_table_exists {
+        return Ok(None);
+    }
+
+    let version = connection.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(Some(version))
+}
+
+pub(crate) fn bootstrap(connection: &Connection) -> Result<(), MigrationError> {
     let existing_sql: Option<String> = connection
         .query_row(
             "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'schema_migrations'",
@@ -306,5 +349,31 @@ mod tests {
         let error = apply_migrations(&mut connection, "test", &changed).unwrap_err();
 
         assert_eq!(error.code(), "MIGRATION_BLOCKED");
+    }
+
+    #[test]
+    fn m0_m1_database_upgrades_in_order_to_m2() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        bootstrap(&connection).unwrap();
+
+        let baseline = apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..2]).unwrap();
+        assert_eq!(baseline.applied, 2);
+        assert_eq!(baseline.newly_applied, 2);
+
+        let upgraded = apply_migrations(&mut connection, "0.1.0", MIGRATIONS).unwrap();
+        assert_eq!(upgraded.applied, 5);
+        assert_eq!(upgraded.newly_applied, 3);
+
+        let versions = connection
+            .prepare("SELECT version FROM schema_migrations ORDER BY version")
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
     }
 }
