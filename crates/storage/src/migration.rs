@@ -62,6 +62,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "staff_site_assignments",
         sql: include_str!("../migrations/0005_staff_site_assignments.sql"),
     },
+    Migration {
+        version: 6,
+        name: "service_catalog_pricing_and_packages",
+        sql: include_str!("../migrations/0006_service_catalog_pricing_and_packages.sql"),
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,7 +368,7 @@ mod tests {
         assert_eq!(baseline.applied, 2);
         assert_eq!(baseline.newly_applied, 2);
 
-        let upgraded = apply_migrations(&mut connection, "0.1.0", MIGRATIONS).unwrap();
+        let upgraded = apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..5]).unwrap();
         assert_eq!(upgraded.applied, 5);
         assert_eq!(upgraded.newly_applied, 3);
 
@@ -375,5 +380,34 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn m2_database_upgrades_in_order_to_m3() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        bootstrap(&connection).unwrap();
+        apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..5]).unwrap();
+
+        let upgraded = apply_migrations(&mut connection, "0.1.0", MIGRATIONS).unwrap();
+        assert_eq!(upgraded.applied, 6);
+        assert_eq!(upgraded.newly_applied, 1);
+
+        let version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let has_service_catalog: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'service_items')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 6);
+        assert!(has_service_catalog);
     }
 }

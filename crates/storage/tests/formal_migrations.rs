@@ -13,6 +13,11 @@ const POSITION_ID: &str = "01J00000000000000000000013";
 const DAY_AREA_ID: &str = "01J00000000000000000000014";
 const HOME_AREA_ID: &str = "01J00000000000000000000015";
 const SITE_ASSIGNMENT_ID: &str = "01J00000000000000000000016";
+const SERVICE_ITEM_ID: &str = "01J00000000000000000000030";
+const CHARGE_ITEM_ID: &str = "01J00000000000000000000031";
+const PRICE_PLAN_ID: &str = "01J00000000000000000000032";
+const PACKAGE_TEMPLATE_ID: &str = "01J00000000000000000000033";
+const PACKAGE_VERSION_ID: &str = "01J00000000000000000000034";
 const NOW: &str = "2026-07-18T01:30:00.000Z";
 
 #[test]
@@ -25,14 +30,14 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
     assert!(first.capabilities().wal_enabled);
     assert!(first.capabilities().json_supported);
     assert!(first.capabilities().strict_supported);
-    assert_eq!(first.migration_report().available, 5);
-    assert_eq!(first.migration_report().applied, 5);
-    assert_eq!(first.migration_report().newly_applied, 5);
+    assert_eq!(first.migration_report().available, 6);
+    assert_eq!(first.migration_report().applied, 6);
+    assert_eq!(first.migration_report().newly_applied, 6);
     assert!(first.pre_upgrade_backup_path().is_none());
     drop(first);
 
     let second = FormalDatabase::open(temp.path()).unwrap();
-    assert_eq!(second.migration_report().applied, 5);
+    assert_eq!(second.migration_report().applied, 6);
     assert_eq!(second.migration_report().newly_applied, 0);
     assert!(second.pre_upgrade_backup_path().is_none());
     let connection = open_test_connection(second.path());
@@ -54,6 +59,7 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
             (3, "staff_and_organization".to_owned()),
             (4, "institution_sites_and_resources".to_owned()),
             (5, "staff_site_assignments".to_owned()),
+            (6, "service_catalog_pricing_and_packages".to_owned()),
         ]
     );
 }
@@ -138,7 +144,7 @@ fn formal_schema_matches_the_reviewed_snapshot() {
     let database = FormalDatabase::open(temp.path()).unwrap();
     let connection = open_test_connection(database.path());
     let actual = schema_snapshot(&connection);
-    let expected = include_str!("snapshots/m0_m2_schema.snapshot").trim();
+    let expected = include_str!("snapshots/m0_m3_schema.snapshot").trim();
 
     assert_eq!(actual, expected);
 }
@@ -367,6 +373,225 @@ fn m2_staff_site_and_resource_constraints_form_a_valid_chain() {
 }
 
 #[test]
+fn m3_catalog_pricing_and_package_constraints_preserve_the_three_layers() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = FormalDatabase::open(temp.path()).unwrap();
+    let connection = open_test_connection(database.path());
+    insert_institution(&connection, INSTITUTION_ID, "ORG-M3").unwrap();
+    insert_staff(&connection, STAFF_ID, INSTITUTION_ID, "STAFF-M3").unwrap();
+
+    insert_service_item(&connection, SERVICE_ITEM_ID, "SVC-001", "active", None).unwrap();
+    connection
+        .execute(
+            "INSERT INTO service_item_scenes(
+                institution_id, created_at, created_by_staff_id, created_source,
+                service_item_id, scene
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, 'day')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, SERVICE_ITEM_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO service_item_qualification_requirements(
+                institution_id, created_at, created_by_staff_id, created_source,
+                service_item_id, qualification_type
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, 'elderly_care')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, SERVICE_ITEM_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO service_item_evidence_requirements(
+                institution_id, created_at, created_by_staff_id, created_source,
+                service_item_id, evidence_type
+             ) VALUES (?1, ?2, ?3, 'manual', ?4, 'note')",
+            params![INSTITUTION_ID, NOW, STAFF_ID, SERVICE_ITEM_ID],
+        )
+        .unwrap();
+    assert!(
+        insert_service_item(
+            &connection,
+            "01J00000000000000000000035",
+            "SVC-002",
+            "inactive",
+            None
+        )
+        .is_err()
+    );
+
+    insert_charge_item(&connection, CHARGE_ITEM_ID, "CHG-001").unwrap();
+    insert_charge_item(&connection, "01J00000000000000000000036", "CHG-002").unwrap();
+    connection
+        .execute(
+            "INSERT INTO service_charge_links(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, service_item_id,
+                charge_item_id, is_default, note
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, ?6, 1, NULL)",
+            params![
+                "01J00000000000000000000037",
+                INSTITUTION_ID,
+                NOW,
+                STAFF_ID,
+                SERVICE_ITEM_ID,
+                CHARGE_ITEM_ID
+            ],
+        )
+        .unwrap();
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO service_charge_links(
+                    id, institution_id, created_at, created_source, updated_at, record_version,
+                    service_item_id, charge_item_id, is_default
+                 ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, 1)",
+                params![
+                    "01J00000000000000000000038",
+                    INSTITUTION_ID,
+                    NOW,
+                    SERVICE_ITEM_ID,
+                    "01J00000000000000000000036"
+                ],
+            )
+            .is_err()
+    );
+
+    connection
+        .execute(
+            "INSERT INTO price_plans(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, price_plan_code,
+                charge_item_id, name, scene_scope, site_id, home_area_id, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, 'PRICE-001',
+                ?5, '日间免费体验价', 'day', NULL, NULL, 'active')",
+            params![PRICE_PLAN_ID, INSTITUTION_ID, NOW, STAFF_ID, CHARGE_ITEM_ID],
+        )
+        .unwrap();
+    assert!(
+        insert_price_version(
+            &connection,
+            "01J00000000000000000000039",
+            1,
+            Some(0),
+            0,
+            "draft",
+            None
+        )
+        .is_err()
+    );
+    insert_price_version(
+        &connection,
+        "01J00000000000000000000040",
+        1,
+        Some(0),
+        1,
+        "active",
+        None,
+    )
+    .unwrap();
+    assert!(
+        insert_price_version(
+            &connection,
+            "01J00000000000000000000041",
+            2,
+            Some(1000),
+            0,
+            "draft",
+            None
+        )
+        .is_err()
+    );
+
+    connection
+        .execute(
+            "INSERT INTO package_templates(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, package_code,
+                name, applicable_scene, status
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1,
+                'PKG-001', '日间基础套餐', 'day', 'active')",
+            params![PACKAGE_TEMPLATE_ID, INSTITUTION_ID, NOW, STAFF_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO package_versions(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version, package_template_id,
+                version_no, version_name, billing_cycle, package_price_cents,
+                effective_from_date, effective_to_date, description, status, change_reason
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5,
+                1, '首版', 'month', 50000, '2026-01-01', NULL,
+                '日间基础套餐首版', 'active', NULL)",
+            params![
+                PACKAGE_VERSION_ID,
+                INSTITUTION_ID,
+                NOW,
+                STAFF_ID,
+                PACKAGE_TEMPLATE_ID
+            ],
+        )
+        .unwrap();
+    assert!(
+        insert_package_entitlement(
+            &connection,
+            "01J00000000000000000000042",
+            None,
+            None,
+            None,
+            None
+        )
+        .is_err()
+    );
+    insert_package_entitlement(
+        &connection,
+        "01J00000000000000000000043",
+        Some(4000),
+        Some("time"),
+        Some("month"),
+        Some(r#"{"schema_version":1,"frequency_type":"weekly","times":1}"#),
+    )
+    .unwrap();
+    assert!(
+        connection
+            .execute(
+                "UPDATE package_entitlements
+                 SET suggested_frequency_json = '{\"schema_version\":0}' WHERE id = ?1",
+                ["01J00000000000000000000043"],
+            )
+            .is_err()
+    );
+    connection
+        .execute(
+            "INSERT INTO package_included_charges(
+                id, institution_id, created_at, created_by_staff_id, created_source,
+                updated_at, updated_by_staff_id, record_version,
+                package_version_id, charge_item_id, inclusion_note
+             ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, ?6, '套餐内已包含')",
+            params![
+                "01J00000000000000000000044",
+                INSTITUTION_ID,
+                NOW,
+                STAFF_ID,
+                PACKAGE_VERSION_ID,
+                CHARGE_ITEM_ID
+            ],
+        )
+        .unwrap();
+
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    let foreign_key_violations: i64 = connection
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    assert_eq!(foreign_key_violations, 0);
+}
+
+#[test]
 fn formal_database_and_r0_probe_remain_isolated() {
     let temp = tempfile::tempdir().unwrap();
     let formal = FormalDatabase::open(temp.path()).unwrap();
@@ -493,6 +718,113 @@ fn insert_site(
             manager_staff_id,
             site_code,
             is_default
+        ],
+    )
+}
+
+fn insert_service_item(
+    connection: &Connection,
+    id: &str,
+    service_code: &str,
+    status: &str,
+    disabled_reason: Option<&str>,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO service_items(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, service_code, name,
+            category, description, standard_steps, default_duration_minutes,
+            result_unit, risk_level, status, disabled_reason
+         ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, '日间照护',
+            'personal_care', '提供日间基础照护', NULL, 30,
+            'time', 'low', ?6, ?7)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            STAFF_ID,
+            service_code,
+            status,
+            disabled_reason
+        ],
+    )
+}
+
+fn insert_charge_item(
+    connection: &Connection,
+    id: &str,
+    charge_code: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO charge_items(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, charge_code, name,
+            category, default_unit, description, status
+         ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, '日间照护费',
+            'service', 'per_time', NULL, 'active')",
+        params![id, INSTITUTION_ID, NOW, STAFF_ID, charge_code],
+    )
+}
+
+fn insert_price_version(
+    connection: &Connection,
+    id: &str,
+    version_no: i64,
+    amount_cents: Option<i64>,
+    is_free: i64,
+    status: &str,
+    change_reason: Option<&str>,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO price_versions(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, price_plan_id,
+            version_no, charge_unit, amount_cents, is_free, effective_from_date,
+            effective_to_date, status, change_reason
+         ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5,
+            ?6, 'per_time', ?7, ?8, '2026-01-01', NULL, ?9, ?10)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            STAFF_ID,
+            PRICE_PLAN_ID,
+            version_no,
+            amount_cents,
+            is_free,
+            status,
+            change_reason
+        ],
+    )
+}
+
+fn insert_package_entitlement(
+    connection: &Connection,
+    id: &str,
+    quota_quantity_milli: Option<i64>,
+    quota_unit: Option<&str>,
+    quota_cycle: Option<&str>,
+    suggested_frequency_json: Option<&str>,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO package_entitlements(
+            id, institution_id, created_at, created_by_staff_id, created_source,
+            updated_at, updated_by_staff_id, record_version, package_version_id,
+            service_item_id, entitlement_type, quota_quantity_milli, quota_unit,
+            quota_cycle, suggested_frequency_json, overage_policy, sort_order
+         ) VALUES (?1, ?2, ?3, ?4, 'manual', ?3, ?4, 1, ?5, ?6,
+            'fixed_quota', ?7, ?8, ?9, ?10, 'prompt_extra', 0)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            STAFF_ID,
+            PACKAGE_VERSION_ID,
+            SERVICE_ITEM_ID,
+            quota_quantity_milli,
+            quota_unit,
+            quota_cycle,
+            suggested_frequency_json
         ],
     )
 }
