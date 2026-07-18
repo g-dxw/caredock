@@ -30,14 +30,14 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
     assert!(first.capabilities().wal_enabled);
     assert!(first.capabilities().json_supported);
     assert!(first.capabilities().strict_supported);
-    assert_eq!(first.migration_report().available, 6);
-    assert_eq!(first.migration_report().applied, 6);
-    assert_eq!(first.migration_report().newly_applied, 6);
+    assert_eq!(first.migration_report().available, 7);
+    assert_eq!(first.migration_report().applied, 7);
+    assert_eq!(first.migration_report().newly_applied, 7);
     assert!(first.pre_upgrade_backup_path().is_none());
     drop(first);
 
     let second = FormalDatabase::open(temp.path()).unwrap();
-    assert_eq!(second.migration_report().applied, 6);
+    assert_eq!(second.migration_report().applied, 7);
     assert_eq!(second.migration_report().newly_applied, 0);
     assert!(second.pre_upgrade_backup_path().is_none());
     let connection = open_test_connection(second.path());
@@ -60,6 +60,7 @@ fn first_install_and_reopen_are_ordered_and_idempotent() {
             (4, "institution_sites_and_resources".to_owned()),
             (5, "staff_site_assignments".to_owned()),
             (6, "service_catalog_pricing_and_packages".to_owned()),
+            (7, "elders_relationships_and_snapshots".to_owned()),
         ]
     );
 }
@@ -144,7 +145,7 @@ fn formal_schema_matches_the_reviewed_snapshot() {
     let database = FormalDatabase::open(temp.path()).unwrap();
     let connection = open_test_connection(database.path());
     let actual = schema_snapshot(&connection);
-    let expected = include_str!("snapshots/m0_m3_schema.snapshot").trim();
+    let expected = include_str!("snapshots/m0_m4_schema.snapshot").trim();
 
     assert_eq!(actual, expected);
 }
@@ -592,6 +593,405 @@ fn m3_catalog_pricing_and_package_constraints_preserve_the_three_layers() {
 }
 
 #[test]
+fn m4_elder_four_scene_relationships_and_snapshots_form_a_complete_chain() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = FormalDatabase::open(temp.path()).unwrap();
+    let connection = open_test_connection(database.path());
+    insert_institution(&connection, INSTITUTION_ID, "ORG-M4").unwrap();
+    insert_staff(&connection, STAFF_ID, INSTITUTION_ID, "STAFF-M4").unwrap();
+    insert_site(&connection, SITE_ID, INSTITUTION_ID, STAFF_ID, 1, "SITE-M4").unwrap();
+
+    connection
+        .execute(
+            "INSERT INTO day_care_areas(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                site_id, area_code, name, capacity, numbered_rest_positions, status
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'DAY-M4', '日间照料区', 20, 0, 'active')",
+            params![DAY_AREA_ID, INSTITUTION_ID, NOW, SITE_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO home_service_areas(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                site_id, area_code, name, province_code, city_code,
+                boundary_description, status
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'HOME-M4', '居家服务区', '41', '4101', '站点周边五公里', 'active')",
+            params![HOME_AREA_ID, INSTITUTION_ID, NOW, SITE_ID],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO space_nodes(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                site_id, node_type, space_code, name, sort_order, status
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'room', 'ROOM-M4', '照护房间', 0, 'active')",
+            params![SPACE_ID, INSTITUTION_ID, NOW, SITE_ID],
+        )
+        .unwrap();
+    insert_accommodation_position(&connection, POSITION_ID, "BED-M4-1", "residential_bed").unwrap();
+    insert_accommodation_position(
+        &connection,
+        "01J00000000000000000000070",
+        "BED-M4-2",
+        "respite_position",
+    )
+    .unwrap();
+
+    insert_service_item(&connection, SERVICE_ITEM_ID, "SVC-M4", "active", None).unwrap();
+    insert_charge_item(&connection, CHARGE_ITEM_ID, "CHG-M4").unwrap();
+    connection
+        .execute(
+            "INSERT INTO price_plans(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                price_plan_code, charge_item_id, name, scene_scope, status
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1,
+                'PRICE-M4', ?4, '标准服务价', 'all', 'active')",
+            params![PRICE_PLAN_ID, INSTITUTION_ID, NOW, CHARGE_ITEM_ID],
+        )
+        .unwrap();
+    insert_price_version(
+        &connection,
+        "01J00000000000000000000071",
+        1,
+        Some(1000),
+        0,
+        "active",
+        None,
+    )
+    .unwrap();
+    insert_package_template_and_version(&connection).unwrap();
+
+    let elder_id = "01J00000000000000000000050";
+    let contact_id = "01J00000000000000000000051";
+    let address_id = "01J00000000000000000000052";
+    insert_elder(&connection, elder_id).unwrap();
+    insert_elder_contact(&connection, contact_id, elder_id).unwrap();
+    connection
+        .execute(
+            "INSERT INTO contact_role_assignments(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                elder_contact_id, role_type, is_primary_for_role,
+                effective_from_date, effective_to_date, basis_note
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'primary', 1, '2026-01-01', NULL, '老人指定联系人')",
+            params![
+                "01J00000000000000000000053",
+                INSTITUTION_ID,
+                NOW,
+                contact_id
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO elder_addresses(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                elder_id, address_type, province_code, city_code, district_code,
+                address_detail, effective_from_date
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'service_candidate', '41', '4101', '410102',
+                '测试路88号', '2026-01-01')",
+            params![address_id, INSTITUTION_ID, NOW, elder_id],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO external_assessment_records(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                elder_id, assessment_type, assessment_level, assessed_date, source_note
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                '外部长护评估', '三级', '2026-01-10', '外部资料录入')",
+            params!["01J00000000000000000000054", INSTITUTION_ID, NOW, elder_id],
+        )
+        .unwrap();
+
+    let day_relationship_id = "01J00000000000000000000055";
+    let day_agreement_id = "01J00000000000000000000056";
+    let day_version_id = "01J00000000000000000000057";
+    insert_service_relationship(
+        &connection,
+        day_relationship_id,
+        elder_id,
+        "REL-DAY-M4",
+        "day",
+    )
+    .unwrap();
+    insert_service_agreement(
+        &connection,
+        day_agreement_id,
+        elder_id,
+        day_relationship_id,
+        contact_id,
+    )
+    .unwrap();
+    insert_relationship_version(
+        &connection,
+        day_version_id,
+        day_relationship_id,
+        contact_id,
+        Some(day_agreement_id),
+    )
+    .unwrap();
+    let day_profile_id = "01J00000000000000000000058";
+    connection
+        .execute(
+            "INSERT INTO day_relationship_profiles(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, day_care_area_id,
+                expected_arrival_time, expected_departure_time, transport_mode
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5,
+                '08:30:00', '17:00:00', 'family')",
+            params![
+                day_profile_id,
+                INSTITUTION_ID,
+                NOW,
+                day_version_id,
+                DAY_AREA_ID
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO day_relationship_attendance_days(
+                institution_id, created_at, created_source,
+                day_relationship_profile_id, weekday
+             ) VALUES (?1, ?2, 'manual', ?3, 'monday')",
+            params![INSTITUTION_ID, NOW, day_profile_id],
+        )
+        .unwrap();
+
+    let home_relationship_id = "01J00000000000000000000059";
+    let home_version_id = "01J00000000000000000000060";
+    insert_service_relationship(
+        &connection,
+        home_relationship_id,
+        elder_id,
+        "REL-HOME-M4",
+        "home",
+    )
+    .unwrap();
+    insert_relationship_version(
+        &connection,
+        home_version_id,
+        home_relationship_id,
+        contact_id,
+        None,
+    )
+    .unwrap();
+    connection
+        .execute(
+            "INSERT INTO home_relationship_profiles(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, home_service_area_id, service_address_id,
+                preferred_visit_windows_json
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, ?6,
+                '{\"schema_version\":1,\"windows\":[]}')",
+            params![
+                "01J00000000000000000000061",
+                INSTITUTION_ID,
+                NOW,
+                home_version_id,
+                HOME_AREA_ID,
+                address_id
+            ],
+        )
+        .unwrap();
+
+    let residential_relationship_id = "01J00000000000000000000062";
+    let residential_version_id = "01J00000000000000000000063";
+    insert_service_relationship(
+        &connection,
+        residential_relationship_id,
+        elder_id,
+        "REL-RES-M4",
+        "residential",
+    )
+    .unwrap();
+    insert_relationship_version(
+        &connection,
+        residential_version_id,
+        residential_relationship_id,
+        contact_id,
+        None,
+    )
+    .unwrap();
+    connection
+        .execute(
+            "INSERT INTO residential_relationship_profiles(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, planned_check_in_at, actual_check_in_at
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?3, ?3)",
+            params![
+                "01J00000000000000000000064",
+                INSTITUTION_ID,
+                NOW,
+                residential_version_id
+            ],
+        )
+        .unwrap();
+    insert_resource_assignment(
+        &connection,
+        "01J00000000000000000000065",
+        residential_version_id,
+        POSITION_ID,
+        "residential",
+        Some("2026-12-31T01:30:00.000Z"),
+    )
+    .unwrap();
+
+    let respite_relationship_id = "01J00000000000000000000066";
+    let respite_version_id = "01J00000000000000000000067";
+    insert_service_relationship(
+        &connection,
+        respite_relationship_id,
+        elder_id,
+        "REL-RESP-M4",
+        "respite",
+    )
+    .unwrap();
+    insert_relationship_version(
+        &connection,
+        respite_version_id,
+        respite_relationship_id,
+        contact_id,
+        None,
+    )
+    .unwrap();
+    connection
+        .execute(
+            "INSERT INTO respite_relationship_profiles(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, respite_type, planned_start_at, planned_end_at
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+                'short_stay', ?3, '2026-07-20T01:30:00.000Z')",
+            params![
+                "01J00000000000000000000068",
+                INSTITUTION_ID,
+                NOW,
+                respite_version_id
+            ],
+        )
+        .unwrap();
+    insert_resource_assignment(
+        &connection,
+        "01J00000000000000000000069",
+        respite_version_id,
+        "01J00000000000000000000070",
+        "respite_dedicated",
+        Some("2026-07-20T01:30:00.000Z"),
+    )
+    .unwrap();
+
+    let package_snapshot_id = "01J00000000000000000000072";
+    connection
+        .execute(
+            "INSERT INTO relationship_package_snapshots(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, source_package_version_id,
+                package_code_snapshot, package_name_snapshot, billing_cycle_snapshot,
+                package_price_snapshot_cents
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5,
+                'PKG-M4', '日间基础套餐', 'month', 50000)",
+            params![
+                package_snapshot_id,
+                INSTITUTION_ID,
+                NOW,
+                day_version_id,
+                PACKAGE_VERSION_ID
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO relationship_entitlement_snapshots(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_package_snapshot_id, source_service_item_id,
+                service_code_snapshot, service_name_snapshot, entitlement_type,
+                quota_quantity_milli, quota_unit, quota_cycle, overage_policy
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5,
+                'SVC-M4', '日间照护', 'fixed_quota', 4000, 'time', 'month', 'prompt_extra')",
+            params![
+                "01J00000000000000000000073",
+                INSTITUTION_ID,
+                NOW,
+                package_snapshot_id,
+                SERVICE_ITEM_ID
+            ],
+        )
+        .unwrap();
+    let pricing_snapshot_id = "01J00000000000000000000074";
+    connection
+        .execute(
+            "INSERT INTO relationship_pricing_snapshots(
+                id, institution_id, created_at, created_source, updated_at, record_version,
+                relationship_version_id, source_charge_item_id, source_price_version_id,
+                charge_code_snapshot, charge_name_snapshot, charge_unit_snapshot,
+                standard_amount_snapshot_cents, actual_amount_cents, pricing_basis
+             ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, ?6,
+                'CHG-M4', '日间照护费', 'per_time', 1000, 1000, 'standard')",
+            params![
+                pricing_snapshot_id,
+                INSTITUTION_ID,
+                NOW,
+                day_version_id,
+                CHARGE_ITEM_ID,
+                "01J00000000000000000000071"
+            ],
+        )
+        .unwrap();
+
+    assert!(
+        connection
+            .execute(
+                "UPDATE elders SET death_date = '2026-07-18' WHERE id = ?1",
+                [elder_id],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE elder_contacts SET mobile = NULL, phone = NULL WHERE id = ?1",
+                [contact_id],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE service_relationships
+                 SET status = 'ended', ended_at = ?1 WHERE id = ?2",
+                params![NOW, day_relationship_id],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE relationship_pricing_snapshots
+                 SET actual_amount_cents = 900 WHERE id = ?1",
+                [pricing_snapshot_id],
+            )
+            .is_err()
+    );
+
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    let foreign_key_violations: i64 = connection
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    assert_eq!(foreign_key_violations, 0);
+}
+
+#[test]
 fn formal_database_and_r0_probe_remain_isolated() {
     let temp = tempfile::tempdir().unwrap();
     let formal = FormalDatabase::open(temp.path()).unwrap();
@@ -825,6 +1225,185 @@ fn insert_package_entitlement(
             quota_unit,
             quota_cycle,
             suggested_frequency_json
+        ],
+    )
+}
+
+fn insert_accommodation_position(
+    connection: &Connection,
+    id: &str,
+    position_code: &str,
+    primary_use: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO accommodation_positions(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            site_id, space_node_id, position_code, name, primary_use,
+            respite_eligible, occupancy_gender_rule, status
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, ?6,
+            ?6, ?7, 1, 'none', 'active')",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            SITE_ID,
+            SPACE_ID,
+            position_code,
+            primary_use
+        ],
+    )
+}
+
+fn insert_package_template_and_version(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute(
+        "INSERT INTO package_templates(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            package_code, name, applicable_scene, status
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1,
+            'PKG-M4', '日间基础套餐', 'day', 'active')",
+        params![PACKAGE_TEMPLATE_ID, INSTITUTION_ID, NOW],
+    )?;
+    connection.execute(
+        "INSERT INTO package_versions(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            package_template_id, version_no, version_name, billing_cycle,
+            package_price_cents, effective_from_date, status
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, 1,
+            '首版', 'month', 50000, '2026-01-01', 'active')",
+        params![PACKAGE_VERSION_ID, INSTITUTION_ID, NOW, PACKAGE_TEMPLATE_ID],
+    )?;
+    Ok(())
+}
+
+fn insert_elder(connection: &Connection, id: &str) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO elders(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            elder_code, full_name, gender, birth_date, id_type, id_number,
+            id_number_normalized, nationality, mobile, mobile_normalized,
+            marital_status, living_status_note, photo_attachment_id,
+            profile_status, death_date, general_note
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1,
+            'ELDER-M4', '测试老人', 'unknown', '1950-01-01', NULL, NULL,
+            NULL, '中国', NULL, NULL, 'unknown', NULL, NULL, 'active', NULL, NULL)",
+        params![id, INSTITUTION_ID, NOW],
+    )
+}
+
+fn insert_elder_contact(
+    connection: &Connection,
+    id: &str,
+    elder_id: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO elder_contacts(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            elder_id, full_name, relationship_to_elder, mobile, mobile_normalized,
+            phone, phone_normalized, id_type, id_number, id_number_normalized,
+            address_json, preferred_contact_method, contact_note, status
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4,
+            '测试家属', 'child', '13800000000', '+8613800000000',
+            NULL, NULL, NULL, NULL, NULL, NULL, 'mobile', NULL, 'active')",
+        params![id, INSTITUTION_ID, NOW, elder_id],
+    )
+}
+
+fn insert_service_relationship(
+    connection: &Connection,
+    id: &str,
+    elder_id: &str,
+    relationship_code: &str,
+    scene: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO service_relationships(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            relationship_code, elder_id, scene, status, planned_start_date,
+            actual_start_at, ended_at, end_reason
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, ?6,
+            'active', '2026-01-01', ?3, NULL, NULL)",
+        params![id, INSTITUTION_ID, NOW, relationship_code, elder_id, scene],
+    )
+}
+
+fn insert_service_agreement(
+    connection: &Connection,
+    id: &str,
+    elder_id: &str,
+    relationship_id: &str,
+    signer_contact_id: &str,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO service_agreements(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            agreement_code, elder_id, service_relationship_id, signer_contact_id,
+            signed_date, effective_from_date, effective_to_date,
+            agreement_attachment_id, status, note
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1,
+            'AGR-M4', ?4, ?5, ?6, '2026-01-01', '2026-01-01',
+            NULL, NULL, 'active', NULL)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            elder_id,
+            relationship_id,
+            signer_contact_id
+        ],
+    )
+}
+
+fn insert_relationship_version(
+    connection: &Connection,
+    id: &str,
+    relationship_id: &str,
+    contact_id: &str,
+    agreement_id: Option<&str>,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO relationship_versions(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            service_relationship_id, version_no, effective_from_at, effective_to_at,
+            site_id, primary_contact_id, emergency_contact_id, payer_contact_id,
+            agreement_id, change_type, change_reason, activated_by_staff_id
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, 1, ?3, NULL,
+            ?5, ?6, NULL, ?6, ?7, 'initial', NULL, ?8)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            relationship_id,
+            SITE_ID,
+            contact_id,
+            agreement_id,
+            STAFF_ID
+        ],
+    )
+}
+
+fn insert_resource_assignment(
+    connection: &Connection,
+    id: &str,
+    relationship_version_id: &str,
+    accommodation_position_id: &str,
+    assignment_type: &str,
+    end_at: Option<&str>,
+) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO resource_assignments(
+            id, institution_id, created_at, created_source, updated_at, record_version,
+            relationship_version_id, accommodation_position_id, assignment_type,
+            start_at, end_at, status, change_reason
+         ) VALUES (?1, ?2, ?3, 'manual', ?3, 1, ?4, ?5, ?6,
+            ?3, ?7, 'active', NULL)",
+        params![
+            id,
+            INSTITUTION_ID,
+            NOW,
+            relationship_version_id,
+            accommodation_position_id,
+            assignment_type,
+            end_at
         ],
     )
 }

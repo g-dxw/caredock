@@ -67,6 +67,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "service_catalog_pricing_and_packages",
         sql: include_str!("../migrations/0006_service_catalog_pricing_and_packages.sql"),
     },
+    Migration {
+        version: 7,
+        name: "elders_relationships_and_snapshots",
+        sql: include_str!("../migrations/0007_elders_relationships_and_snapshots.sql"),
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,7 +396,7 @@ mod tests {
         bootstrap(&connection).unwrap();
         apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..5]).unwrap();
 
-        let upgraded = apply_migrations(&mut connection, "0.1.0", MIGRATIONS).unwrap();
+        let upgraded = apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..6]).unwrap();
         assert_eq!(upgraded.applied, 6);
         assert_eq!(upgraded.newly_applied, 1);
 
@@ -409,5 +414,34 @@ mod tests {
             .unwrap();
         assert_eq!(version, 6);
         assert!(has_service_catalog);
+    }
+
+    #[test]
+    fn m3_database_upgrades_in_order_to_m4() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        bootstrap(&connection).unwrap();
+        apply_migrations(&mut connection, "0.1.0", &MIGRATIONS[..6]).unwrap();
+
+        let upgraded = apply_migrations(&mut connection, "0.1.0", MIGRATIONS).unwrap();
+        assert_eq!(upgraded.applied, 7);
+        assert_eq!(upgraded.newly_applied, 1);
+
+        let version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let has_relationships: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'service_relationships')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 7);
+        assert!(has_relationships);
     }
 }

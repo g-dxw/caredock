@@ -96,7 +96,7 @@ mod tests {
         let upgraded = FormalDatabase::open(temp.path()).unwrap();
         let backup_path = upgraded.pre_upgrade_backup_path().unwrap();
         assert!(backup_path.exists());
-        assert_eq!(upgraded.migration_report().applied, 6);
+        assert_eq!(upgraded.migration_report().applied, 7);
 
         let backup = Connection::open(backup_path).unwrap();
         let backup_version: i64 = backup
@@ -142,7 +142,37 @@ mod tests {
             .unwrap();
         assert_eq!(backup_version, 5);
         assert!(!has_service_catalog);
-        assert_eq!(upgraded.migration_report().applied, 6);
+        assert_eq!(upgraded.migration_report().applied, 7);
+    }
+
+    #[test]
+    fn upgrading_an_m3_file_backs_up_version_six_before_m4() {
+        let temp = tempfile::tempdir().unwrap();
+        let database_path = temp.path().join(FORMAL_DATABASE_FILE_NAME);
+        let mut baseline = Connection::open(&database_path).unwrap();
+        configure_connection(&baseline).unwrap();
+        bootstrap(&baseline).unwrap();
+        apply_migrations(&mut baseline, "0.1.0", &MIGRATIONS[..6]).unwrap();
+        drop(baseline);
+
+        let upgraded = FormalDatabase::open(temp.path()).unwrap();
+        let backup_path = upgraded.pre_upgrade_backup_path().unwrap();
+        let backup = Connection::open(backup_path).unwrap();
+        let backup_version: i64 = backup
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let has_relationships: bool = backup
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'service_relationships')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backup_version, 6);
+        assert!(!has_relationships);
+        assert_eq!(upgraded.migration_report().applied, 7);
     }
 
     #[test]
