@@ -1,11 +1,12 @@
-# 安养台 R0 技术验证工程
+# 安养台一期桌面工程
 
-这是全新的一期技术骨架，只验证Tauri、Gateway/Command、Rust分层、bundled SQLite、migration、事务和备份能力。
+这是全新的一期技术骨架。R0已经验证Tauri、Gateway/Command、Rust分层、bundled SQLite、事务和备份能力；M0—M1已经加入正式数据库连接、migration runner及第一批正式表。
 
 - 不包含正式业务页面。
-- 不包含正式92张业务表。
+- 正式数据库文件为`anyangtai.sqlite`，与`r0-probe.sqlite`完全隔离。
+- 当前只实现`schema_migrations`、`institutions`、`attachments`和`audit_events`；`0003—0012`尚未开始。
 - 不读取或迁移上级目录废弃`app/`的数据。
-- 当前只允许匿名技术探针数据。
+- 不安装机构演示数据，也不执行机构初始化业务用例。
 
 ## 本地命令
 

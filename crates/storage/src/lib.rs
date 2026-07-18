@@ -9,6 +9,14 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod capability_probe;
+mod database;
+mod migration;
+
+pub use capability_probe::SqliteCapabilities;
+pub use database::{FORMAL_DATABASE_FILE_NAME, FormalDatabase};
+pub use migration::{MigrationError, MigrationReport};
+
 const DATABASE_FILE_NAME: &str = "r0-probe.sqlite";
 const BACKUP_FILE_NAME: &str = "r0-probe-backup.sqlite";
 

@@ -1,0 +1,64 @@
+TABLE attachments strict=1 sql_sha256=cd2d9027c8055540d805a02d80b3dfcc114793c1f57ca6969892718754bdaa4d
+  COLUMN id TEXT not_null=1 default=NULL pk=1 hidden=0
+  COLUMN institution_id TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN created_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN created_by_staff_id TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN created_source TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN updated_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN updated_by_staff_id TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN record_version INTEGER not_null=1 default=NULL pk=0 hidden=0
+  COLUMN attachment_code TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN original_file_name TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN media_type TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN file_size_bytes INTEGER not_null=1 default=NULL pk=0 hidden=0
+  COLUMN content_hash_sha256 TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN local_storage_key TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN sensitivity_level TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN captured_at TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN uploaded_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN status TEXT not_null=1 default=NULL pk=0 hidden=0
+  FK institution_id -> institutions.id on_update=RESTRICT on_delete=RESTRICT
+TABLE audit_events strict=1 sql_sha256=18c27d20a1b64870fe0377ea110346666176edec0fe1d7939a9ce39f3e759064
+  COLUMN id TEXT not_null=1 default=NULL pk=1 hidden=0
+  COLUMN institution_id TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN occurred_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN operator_staff_id TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN event_source TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN action TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN target_type TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN target_id TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN summary TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN before_digest TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN after_digest TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN reason TEXT not_null=0 default=NULL pk=0 hidden=0
+  FK institution_id -> institutions.id on_update=RESTRICT on_delete=RESTRICT
+TABLE institutions strict=1 sql_sha256=98fd7a98da98e52d0a00822c0a972bb8f229a4c634721c4ff716e73aa9967979
+  COLUMN id TEXT not_null=1 default=NULL pk=1 hidden=0
+  COLUMN created_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN created_by_staff_id TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN created_source TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN updated_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN updated_by_staff_id TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN record_version INTEGER not_null=1 default=NULL pk=0 hidden=0
+  COLUMN institution_code TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN name TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN short_name TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN registration_type TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN ownership_nature TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN operation_mode TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN legal_representative_name TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN contact_phone TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN province_code TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN city_code TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN district_code TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN address_detail TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN postal_code TEXT not_null=0 default=NULL pk=0 hidden=0
+  COLUMN status TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN initialized_at TEXT not_null=1 default=NULL pk=0 hidden=0
+TABLE schema_migrations strict=1 sql_sha256=73f212a35d9c1b79aa686973aaa87a600df4697fb4b00f82013acbb8757ee9db
+  COLUMN version INTEGER not_null=0 default=NULL pk=1 hidden=0
+  COLUMN name TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN checksum_sha256 TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN applied_at TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN application_version TEXT not_null=1 default=NULL pk=0 hidden=0
+  COLUMN execution_ms INTEGER not_null=1 default=NULL pk=0 hidden=0

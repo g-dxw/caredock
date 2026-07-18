@@ -19,3 +19,4 @@ sha2 = "0.10"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 thiserror = "2"
+time = { version = "0.3", features = ["formatting", "macros"] }
