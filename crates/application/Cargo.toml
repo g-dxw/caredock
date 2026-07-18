@@ -1,0 +1,7 @@
+[package]
+name = "anyangtai-application"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyangtai-domain = { path = "../domain" }

@@ -1,0 +1,11 @@
+[package]
+name = "anyangtai-desktop-commands"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyangtai-application = { path = "../application" }
+anyangtai-domain = { path = "../domain" }
+anyangtai-storage = { path = "../storage" }
+serde.workspace = true
+tauri.workspace = true

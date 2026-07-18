@@ -1,0 +1,20 @@
+{
+  "name": "anyangtai",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3"
+  },
+  "scripts": {
+    "build": "corepack pnpm --filter @anyangtai/desktop build",
+    "typecheck": "corepack pnpm -r typecheck",
+    "test:rust": "cargo test --workspace",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
+    "check": "corepack pnpm typecheck && corepack pnpm build && corepack pnpm test:rust && corepack pnpm check:rust",
+    "tauri": "corepack pnpm --filter @anyangtai/desktop tauri"
+  }
+}
